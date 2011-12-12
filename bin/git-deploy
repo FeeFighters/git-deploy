@@ -228,37 +228,21 @@ module Git
     def initialize(options)
       super(options)
       @remote_directories = {}
-      @port = options['port'] || 21
+      @port = options['port'] || 22
     end
 
     def connect
       puts "Connecting to #{@host}"
 
-      @ftp = Net::FTP.new
-
-      if @options['passive']
-        @ftp.passive = true
-      end
-
-      if @options['debug_mode']
-        @ftp.debug_mode = true
-      end
-
-      @ftp.binary = true
-      @ftp.connect(@options['host'], @options['port'])
-      @ftp.login(@options['user'], @options['password'])
-
-      # path is a string 
-      if @options['path'].class.to_s.eql?("String")
-        @ftp.chdir(@options['path'])
-      #path is a hash with different paths - get correct path from mode
-      else
-        @ftp.chdir(@options['path'][@options['mode']])
-      end
+      @ftp = Net::SFTP.start(@options['host'], @options['user'], :password=>@options['password'], :logger=>Logger.new(STDOUT), :verbose=>:info)
     end
 
     def disconnect
       @ftp.quit
+    end
+
+    def remote_path(path)
+      "#{@options['path']}/#{path}"
     end
 
     def put(local_file, remote_file)
@@ -269,7 +253,7 @@ module Git
         @remote_directories[dir] = true
       end
     
-      @ftp.put(local_file, remote_file)
+      @ftp.upload!(local_file, remote_path(remote_file))
     end
 
     def delete(remote_file)
@@ -283,9 +267,8 @@ module Git
     def get_remote_revision
       remote_revision = false
       begin
-        @ftp.get('REVISION', Tempfile.new(@host).path) do |line|
-          remote_revision = line.strip
-        end
+        data = @ftp.download!(remote_path('REVISION'))
+        remote_revision = data.strip
 
         puts "Remote Revision: #{remote_revision}"
       rescue Net::FTPPermError => e
@@ -296,32 +279,33 @@ module Git
     end
 
     def mkdir_p(directory)
-      begin
-        parent = File.dirname(directory)
-        files = @ftp.nlst(parent)
-
-        if directory == "." || files.any? { |a| a == directory }
-          return
-        else
-          puts "Creating Directory #{directory}"
-          @ftp.mkdir(directory)
-        end
-      rescue Net::FTPPermError
-        self.mkdir_p(File.dirname(directory))
-        begin
-          @ftp.mkdir(directory)
-        rescue Net::FTPPermError
-          # pass
-        end
-      rescue Net::FTPTempError
-        begin
-          puts "Creating Directory #{directory}"
-          @ftp.mkdir(directory)
-        rescue Net::FTPPermError => e
-          self.mkdir_p(File.dirname(directory))
-          @ftp.mkdir(directory)
-        end
-      end
+      @ftp.mkdir(remote_path(directory))
+      # begin
+      #   parent = File.dirname(directory)
+      #   files = @ftp.dir.glob(@options['path'], parent+'*').map{|f| f.name }
+      # 
+      #   if directory == "." || files.any? { |a| a == directory }
+      #     return
+      #   else
+      #     puts "Creating Directory #{directory}"
+      #     @ftp.mkdir(remote_path(directory))
+      #   end
+      # rescue Net::FTPPermError
+      #   self.mkdir_p(File.dirname(directory))
+      #   begin
+      #     @ftp.mkdir(remote_path(directory))
+      #   rescue Net::FTPPermError
+      #     # pass
+      #   end
+      # rescue Net::FTPTempError
+      #   begin
+      #     puts "Creating Directory #{directory}"
+      #     @ftp.mkdir(remote_path(directory))
+      #   rescue Net::FTPPermError => e
+      #     self.mkdir_p(File.dirname(directory))
+      #     @ftp.mkdir(remote_path(directory))
+      #   end
+      # end
     end
   end # FTP < Service
 end
